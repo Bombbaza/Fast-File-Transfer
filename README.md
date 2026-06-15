@@ -144,6 +144,109 @@ upload additionally require the per-upload `uploadSecret` returned by init.
 
 See [`DESIGN.md`](./DESIGN.md) for the protocol, integrity, and security model.
 
+## Federation mode
+
+Federation mode lets agents send files **to each other by agent ID** through a
+shared relay gateway, with a **consent-gate**: the recipient must explicitly
+accept before any bytes are delivered.
+
+```
+agent-a  →  POST /v1/transfers (to=agent-b)  →  gateway
+            PATCH /v1/uploads/:id  (chunks)
+            POST  /v1/uploads/:id/commit
+
+agent-b  →  GET  /v1/transfers/incoming       →  gateway  (metadata only)
+         →  POST /v1/transfers/:id/accept     →  gateway
+         →  GET  /v1/transfers/:id/content    →  gateway  (bytes, sha256-verified)
+```
+
+### Quickstart (A → gateway → B)
+
+**1. Start a gateway**
+
+```bash
+FFT_TOKEN=relay-token node dist/cli.js serve
+```
+
+The standard `fft serve` command runs in both direct and federation mode
+simultaneously — the federation routes live under `/v1/agents` and
+`/v1/transfers` on the same port.
+
+**2. Register both agents**
+
+```bash
+# agent-a
+node dist/cli.js federation register \
+  --gateway https://gateway.example.com --agent agent-a --token relay-token
+
+# agent-b (on another machine)
+node dist/cli.js federation register \
+  --gateway https://gateway.example.com --agent agent-b --token relay-token
+```
+
+**3. agent-a sends a file**
+
+```bash
+node dist/cli.js federation send ./report.pdf \
+  --to agent-b \
+  --gateway https://gateway.example.com --agent agent-a --token relay-token
+# prints: <transferId>
+```
+
+**4. agent-b lists incoming, accepts, and downloads**
+
+```bash
+# List pending transfers (metadata only — no bytes yet).
+node dist/cli.js federation recv \
+  --gateway https://gateway.example.com --agent agent-b --token relay-token
+
+# Accept (consent-gate).
+node dist/cli.js federation accept <transferId> \
+  --gateway https://gateway.example.com --agent agent-b --token relay-token
+
+# Download (sha256-verified, resumable).
+node dist/cli.js federation download <transferId> \
+  --gateway https://gateway.example.com --agent agent-b --token relay-token \
+  --out ./report.pdf
+```
+
+### Library usage
+
+```ts
+import {
+  registerAgent, sendToAgent, listIncoming,
+  acceptTransfer, downloadTransfer,
+} from "fast-file-transfer";
+
+const opts = { gateway: "https://gateway.example.com", agentId: "agent-a", token: "relay-token" };
+await registerAgent(opts);
+const { transferId } = await sendToAgent({ ...opts, file: "./data.zip", toAgentId: "agent-b" });
+
+// On agent-b's side:
+const optsB = { ...opts, agentId: "agent-b" };
+const [pending] = await listIncoming(optsB);
+await acceptTransfer({ ...optsB, transferId: pending.transferId });
+await downloadTransfer({ ...optsB, transferId: pending.transferId, dest: "./data.zip" });
+```
+
+### Custom agent authentication
+
+```ts
+import { createFederationGateway } from "fast-file-transfer";
+
+const server = createFederationGateway({
+  config,
+  authenticateAgent: (req) => {
+    const claims = verifyMyJwt(req.headers["authorization"]);
+    return claims ? { agentId: claims.sub } : null;
+  },
+});
+server.listen(8787);
+```
+
+See [docs/FEDERATION.md](./docs/FEDERATION.md) for the full protocol,
+consent-gate model, and security notes.
+
 ## Security notes
 
 - **Run behind TLS.** This server speaks plain HTTP; terminate TLS at a reverse
@@ -162,6 +265,9 @@ npm run typecheck   # tsc --noEmit
 npm test            # node --import tsx --test test/*.test.ts
 npm run build       # emit dist/
 ```
+
+The test suite runs 31 tests: 18 for the core engine and 13 for federation mode
+(registration, addressing, consent-gate, e2e A→B, decline, download-before-accept).
 
 ## License
 

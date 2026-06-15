@@ -211,3 +211,97 @@ node dist/cli.js recv <id> --from https://fft.example.com --token "$FFT_TOKEN" -
 
 See [`../DESIGN.md`](../DESIGN.md) for the protocol and security model, and the
 [README](../README.md) for the full configuration reference.
+
+---
+
+## Deploying the federation relay gateway
+
+The relay gateway runs the same binary as the direct server — federation routes
+(`/v1/agents`, `/v1/transfers`) are added automatically. Follow steps 1–5 above,
+then apply the adjustments below.
+
+### Additional environment variables
+
+Append to `/opt/fft/.env`:
+
+```ini
+# Relay token — ALL agents must present this as "Authorization: Bearer <token>".
+# Generate a strong value: openssl rand -hex 32
+FFT_TOKEN=<strong-relay-token>
+```
+
+You may also want a longer retention period for in-flight transfers:
+
+```ini
+FFT_RETENTION_DAYS=7        # keep committed files for 7 days
+FFT_SESSION_IDLE_MINUTES=120
+```
+
+### systemd unit for the relay gateway
+
+`/etc/systemd/system/fft-relay.service`:
+
+```ini
+[Unit]
+Description=Fast File Transfer relay gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fft
+Group=fft
+WorkingDirectory=/opt/fft
+EnvironmentFile=/opt/fft/.env
+ExecStart=/usr/bin/node /opt/fft/dist/cli.js serve
+Restart=on-failure
+RestartSec=3
+
+# hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fft
+StateDirectory=fft
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now fft-relay
+sudo systemctl status fft-relay
+curl -s http://127.0.0.1:8787/healthz   # -> {"ok":true,"mode":"federation"}
+```
+
+### HTTPS reverse proxy for the relay gateway
+
+Use the same Caddy or nginx blocks from step 4. Point your agents at the HTTPS
+URL:
+
+```bash
+# Caddy (recommended — auto TLS)
+# /etc/caddy/Caddyfile
+relay.example.com {
+    reverse_proxy 127.0.0.1:8787
+    request_body {
+        max_size 0
+    }
+}
+```
+
+### Security checklist for the relay gateway
+
+- [ ] Strong `FFT_TOKEN` (`openssl rand -hex 32`), never committed
+- [ ] `.env` is `chmod 600`, owned by the service user
+- [ ] Gateway bound to `127.0.0.1`; only the TLS proxy is public
+- [ ] HTTPS enforced at the proxy (the gateway is plain HTTP)
+- [ ] Firewall: only 80/443/SSH exposed
+- [ ] Runs as the unprivileged `fft` user, not root
+- [ ] Consider replacing the default `bearerAgentAuth` with a scheme that
+      cryptographically binds each agent's identity (JWT, mTLS, HMAC challenge)
+- [ ] Set `FFT_RETENTION_DAYS` / `FFT_QUOTA_BYTES` to limit per-agent storage
+
+See [FEDERATION.md](./FEDERATION.md) for the protocol specification.

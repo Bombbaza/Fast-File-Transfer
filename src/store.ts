@@ -291,6 +291,15 @@ export class Store {
 
   fileReadPath(id: string): string { return this.filePath(id); }
 
+  /**
+   * Delete a committed file and its metadata. Used by the federation gateway
+   * when a recipient declines a transfer.
+   */
+  async deleteFile(id: string): Promise<void> {
+    await unlink(this.filePath(id)).catch(() => {});
+    await unlink(this.fileMetaPath(id)).catch(() => {});
+  }
+
   // ---- garbage collection --------------------------------------------------
 
   /** Remove idle sessions (frees their reservation) and expired files. Returns counts. */

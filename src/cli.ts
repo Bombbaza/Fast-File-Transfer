@@ -1,9 +1,22 @@
 #!/usr/bin/env node
-// Command-line interface: `fft serve`, `fft send <file>`, `fft recv <id>`.
+// Command-line interface:
+//   fft serve                          start the direct transfer server
+//   fft send <file> --to <url>         upload a file directly
+//   fft recv <id> --from <url>         download a file directly
+//   fft federation send <file> ...     send via relay gateway to a specific agent
+//   fft federation recv ...            list incoming, accept, and download from gateway
 
 import { loadConfig } from "./config.js";
 import { startServer } from "./server.js";
 import { upload, download } from "./client.js";
+import {
+  registerAgent,
+  sendToAgent,
+  listIncoming,
+  acceptTransfer,
+  declineTransfer,
+  downloadTransfer,
+} from "./federation/index.js";
 
 interface Parsed {
   pos: string[];
@@ -62,20 +75,30 @@ function progress(label: string): (done: number, total: number) => void {
 const USAGE = `Fast File Transfer (fft)
 
 Usage:
-  fft serve                          Start the transfer server (config from env / .env)
-  fft send <file> --to <url>         Upload a file; prints the file id on success
-  fft recv <id> --from <url>         Download a file by id (verifies sha256)
+  fft serve                                   Start the direct transfer server
+  fft send <file> --to <url>                  Upload a file; prints the file id
+  fft recv <id> --from <url>                  Download a file by id (verifies sha256)
+
+  fft federation register                     Register this agent on the gateway
+  fft federation send <file> --to <agentId>   Send a file to another agent via gateway
+  fft federation recv                         List incoming transfers (metadata only)
+  fft federation accept <transferId>          Accept a pending transfer (consent-gate)
+  fft federation decline <transferId>         Decline a pending transfer
+  fft federation download <transferId>        Download an accepted transfer
 
 Options:
-  --to <url>      Server base URL for send (or env FFT_SERVER)
-  --from <url>    Server base URL for recv (or env FFT_SERVER)
-  --token <tok>   Bearer token (or env FFT_TOKEN)
-  --name <name>   Override the filename for send
-  --chunk <n>     Chunk size in bytes for send
-  --out <path>    Output path for recv (default: stored filename)
-  -h, --help      Show this help
+  --to <url|agentId>  Server URL (send/recv) or recipient agentId (federation send)
+  --from <url>        Server base URL for recv
+  --gateway <url>     Relay gateway base URL (or env FFT_GATEWAY)
+  --agent <id>        Your agent id (or env FFT_AGENT_ID)
+  --token <tok>       Bearer token (or env FFT_TOKEN)
+  --name <name>       Override the filename for send
+  --chunk <n>         Chunk size in bytes for send
+  --out <path>        Output path for recv/download (default: stored filename)
+  -h, --help          Show this help
 
 Server env vars: see .env.example (FFT_TOKEN, FFT_PORT, FFT_STORAGE_DIR, ...).
+Federation env vars: FFT_GATEWAY, FFT_AGENT_ID, FFT_TOKEN.
 `;
 
 function fail(msg: string): never {
@@ -126,6 +149,93 @@ async function main(): Promise<void> {
     const token = str(flags.token) ?? process.env.FFT_TOKEN;
     const meta = await download({ server, token, id, dest: str(flags.out), onProgress: progress("recv") });
     process.stderr.write(`saved: ${meta.name} (${fmtBytes(meta.size)})  sha256=${meta.sha256}\n`);
+    return;
+  }
+
+  // ---- federation subcommands -----------------------------------------------
+
+  if (cmd === "federation") {
+    const sub = pos[1];
+    const gateway = str(flags.gateway) ?? process.env.FFT_GATEWAY;
+    const agentId = str(flags.agent) ?? process.env.FFT_AGENT_ID;
+    const token = str(flags.token) ?? process.env.FFT_TOKEN;
+
+    if (!sub || sub === "help") {
+      process.stdout.write(USAGE);
+      return;
+    }
+
+    if (!gateway) fail("federation: provide --gateway <url> or set FFT_GATEWAY");
+    if (!agentId) fail("federation: provide --agent <id> or set FFT_AGENT_ID");
+
+    const fedOpts = { gateway: gateway!, agentId: agentId!, token };
+
+    if (sub === "register") {
+      const res = await registerAgent(fedOpts);
+      process.stderr.write(`registered: ${res.agentId}  at=${new Date(res.registeredAt).toISOString()}\n`);
+      return;
+    }
+
+    if (sub === "send") {
+      const file = pos[2];
+      if (!file) fail("federation send: missing <file>");
+      const toAgent = str(flags.to);
+      if (!toAgent) fail("federation send: provide --to <agentId>");
+      const res = await sendToAgent({
+        ...fedOpts,
+        file: file!,
+        toAgentId: toAgent!,
+        name: str(flags.name),
+        chunkSize: num(flags.chunk),
+        onProgress: progress("send"),
+      });
+      process.stdout.write(`${res.transferId}\n`);
+      process.stderr.write(`done: transferId=${res.transferId}  sha256=${res.sha256}\n`);
+      return;
+    }
+
+    if (sub === "recv") {
+      const list = await listIncoming({ ...fedOpts, status: "pending" });
+      if (list.length === 0) {
+        process.stderr.write("no pending transfers\n");
+        return;
+      }
+      for (const t of list) {
+        process.stdout.write(`${t.transferId}\t${t.fromAgentId}\t${t.name}\t${fmtBytes(t.size)}\t${t.status}\n`);
+      }
+      return;
+    }
+
+    if (sub === "accept") {
+      const transferId = pos[2];
+      if (!transferId) fail("federation accept: missing <transferId>");
+      const res = await acceptTransfer({ ...fedOpts, transferId: transferId! });
+      process.stderr.write(`accepted: ${res.transferId}\n`);
+      return;
+    }
+
+    if (sub === "decline") {
+      const transferId = pos[2];
+      if (!transferId) fail("federation decline: missing <transferId>");
+      const res = await declineTransfer({ ...fedOpts, transferId: transferId! });
+      process.stderr.write(`declined: ${res.transferId}\n`);
+      return;
+    }
+
+    if (sub === "download") {
+      const transferId = pos[2];
+      if (!transferId) fail("federation download: missing <transferId>");
+      const meta = await downloadTransfer({
+        ...fedOpts,
+        transferId: transferId!,
+        dest: str(flags.out),
+        onProgress: progress("recv"),
+      });
+      process.stderr.write(`saved: ${meta.name} (${fmtBytes(meta.size)})  sha256=${meta.sha256}\n`);
+      return;
+    }
+
+    fail(`unknown federation subcommand: ${sub}`);
     return;
   }
 
