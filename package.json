@@ -1,0 +1,59 @@
+{
+  "name": "fast-file-transfer",
+  "version": "0.1.0",
+  "description": "Resumable, integrity-verified large-file transfer over HTTP — chunked, sha256-checked, with a pluggable auth model. Zero runtime dependencies.",
+  "type": "module",
+  "bin": {
+    "fft": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    ".env.example"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "serve": "tsx src/cli.ts serve",
+    "fft": "tsx src/cli.ts"
+  },
+  "keywords": [
+    "file-transfer",
+    "chunked",
+    "resumable",
+    "sha256",
+    "integrity",
+    "http",
+    "cli",
+    "streaming",
+    "large-files"
+  ],
+  "license": "MIT",
+  "author": "Bombbaza",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Bombbaza/Fast-File-Transfer.git"
+  },
+  "homepage": "https://github.com/Bombbaza/Fast-File-Transfer#readme",
+  "bugs": {
+    "url": "https://github.com/Bombbaza/Fast-File-Transfer/issues"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

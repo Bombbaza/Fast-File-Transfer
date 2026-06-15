@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment / secrets — NEVER commit a real .env
+.env
+.env.local
+.env.*.local
+
+# FFT runtime data — transferred files + in-progress chunk sessions
+fft-data/
+storage/
+*.partial
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
