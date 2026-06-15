@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.png" alt="Fast File Transfer — resumable, integrity-verified, chunked file transfer over HTTP" width="100%">
+</p>
+
 # Fast File Transfer (`fft`)
 
 Resumable, integrity-verified large-file transfer over plain HTTP — chunked,
