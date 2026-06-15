@@ -69,6 +69,10 @@ node dist/cli.js recv 3f1c… --from http://your-server:8787 --token "$FFT_TOKEN
 
 (During development you can run the CLI without building: `npx tsx src/cli.ts ...`.)
 
+**Deploying to a server?** See **[docs/DEPLOY.md](docs/DEPLOY.md)** — a production-ready
+VPS setup with a systemd service, HTTPS reverse proxy (Caddy or nginx), firewall, and a
+security checklist.
+
 ## Configuration
 
 The server reads these environment variables (see `.env.example`):
